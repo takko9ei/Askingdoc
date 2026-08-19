@@ -1,0 +1,16 @@
+# --- from playbook STEP0 spec (do not remove) ---
+.venv/
+storage/
+.env
+__pycache__/
+*.pkl
+
+# --- standard Python noise ---
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# --- OS / editor cruft ---
+.DS_Store
+.vscode/
+.idea/
