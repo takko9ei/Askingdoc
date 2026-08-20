@@ -1,0 +1,404 @@
+{
+  "meta": {
+    "mode": "dev",
+    "config_name": "full",
+    "n_questions": 12,
+    "elapsed_seconds": 7.4,
+    "timestamp": "2026-08-20T18:20:53"
+  },
+  "overall": {
+    "n_retrieval_questions": 10,
+    "recall_at_5": 0.9,
+    "recall_at_20": 1.0,
+    "mrr": 0.7095833333333333,
+    "n_negative_questions": 2,
+    "abstention_rate": 1.0
+  },
+  "by_type": {
+    "fact_lookup": {
+      "n_retrieval_questions": 6,
+      "recall_at_5": 0.8333333333333334,
+      "recall_at_20": 1.0,
+      "mrr": 0.7604166666666666,
+      "n_negative_questions": 0,
+      "abstention_rate": null
+    },
+    "keyword_exact": {
+      "n_retrieval_questions": 2,
+      "recall_at_5": 1.0,
+      "recall_at_20": 1.0,
+      "mrr": 0.6,
+      "n_negative_questions": 0,
+      "abstention_rate": null
+    },
+    "negative": {
+      "n_retrieval_questions": 0,
+      "recall_at_5": 0.0,
+      "recall_at_20": 0.0,
+      "mrr": 0.0,
+      "n_negative_questions": 2,
+      "abstention_rate": 1.0
+    },
+    "multi_hop": {
+      "n_retrieval_questions": 2,
+      "recall_at_5": 1.0,
+      "recall_at_20": 1.0,
+      "mrr": 0.6666666666666666,
+      "n_negative_questions": 0,
+      "abstention_rate": null
+    }
+  },
+  "per_question": [
+    {
+      "qid": "q001",
+      "type": "fact_lookup",
+      "question": "如何安装握柄？",
+      "gold_pages": [
+        44
+      ],
+      "retrieved_pages_top20": [
+        45,
+        44,
+        90,
+        23,
+        138,
+        66,
+        24,
+        90,
+        34,
+        87,
+        86,
+        53,
+        65,
+        90,
+        143,
+        144,
+        143,
+        144,
+        144,
+        56
+      ],
+      "hit_rank": 2,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q002",
+      "type": "fact_lookup",
+      "question": "如何隐藏触摸功能图标？",
+      "gold_pages": [
+        48,
+        54
+      ],
+      "retrieved_pages_top20": [
+        48,
+        54,
+        52,
+        65,
+        69,
+        122,
+        53,
+        48,
+        122,
+        45,
+        144,
+        48,
+        144,
+        49,
+        94,
+        54,
+        121,
+        54,
+        38,
+        70
+      ],
+      "hit_rank": 1,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q003",
+      "type": "keyword_exact",
+      "question": "FE 28-60mm F4-5.6的35mm等效焦距是多少？",
+      "gold_pages": [
+        50
+      ],
+      "retrieved_pages_top20": [
+        50,
+        113,
+        143,
+        115,
+        114,
+        125,
+        127,
+        46,
+        50,
+        2,
+        145,
+        143,
+        140,
+        49,
+        147,
+        112,
+        98,
+        139,
+        46,
+        95
+      ],
+      "hit_rank": 1,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q004",
+      "type": "fact_lookup",
+      "question": "如何显示拍摄设置的列表？",
+      "gold_pages": [
+        60,
+        62
+      ],
+      "retrieved_pages_top20": [
+        60,
+        100,
+        136,
+        54,
+        63,
+        54,
+        46,
+        48,
+        59,
+        114,
+        48,
+        60,
+        65,
+        99,
+        18,
+        115,
+        134,
+        61,
+        48,
+        70
+      ],
+      "hit_rank": 1,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q005",
+      "type": "fact_lookup",
+      "question": "如何使用USB-PD兼容设备对电池进行充电？",
+      "gold_pages": [
+        80
+      ],
+      "retrieved_pages_top20": [
+        80,
+        79,
+        83,
+        82,
+        91,
+        29,
+        29,
+        80,
+        29,
+        80,
+        81,
+        44,
+        29,
+        31,
+        29,
+        45,
+        28,
+        84,
+        86,
+        22
+      ],
+      "hit_rank": 1,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q006",
+      "type": "fact_lookup",
+      "question": "如何使用触摸功能图标进行拍摄？",
+      "gold_pages": [
+        97
+      ],
+      "retrieved_pages_top20": [
+        48,
+        54,
+        144,
+        94,
+        54,
+        48,
+        54,
+        52,
+        122,
+        51,
+        53,
+        49,
+        38,
+        65,
+        64,
+        97,
+        48,
+        137,
+        122,
+        98
+      ],
+      "hit_rank": 16,
+      "recall_at_5": false,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q007",
+      "type": "fact_lookup",
+      "question": "怎么清理CMOS？",
+      "gold_pages": [
+        32,
+        33
+      ],
+      "retrieved_pages_top20": [
+        32,
+        33,
+        34,
+        31,
+        34,
+        71,
+        70,
+        27,
+        45,
+        87,
+        77,
+        1,
+        90,
+        22,
+        31,
+        29,
+        127,
+        31,
+        56,
+        65
+      ],
+      "hit_rank": 1,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q008",
+      "type": "negative",
+      "question": "这台相机能录制10倍慢动作视频吗？",
+      "gold_pages": [],
+      "generated_answer": "文档中未提及相关信息。",
+      "abstained": true
+    },
+    {
+      "qid": "q009",
+      "type": "multi_hop",
+      "question": "拍视频拍到相机过热了，相机和存储卡分别要怎么处理？",
+      "gold_pages": [
+        31,
+        98
+      ],
+      "retrieved_pages_top20": [
+        31,
+        98,
+        22,
+        99,
+        23,
+        22,
+        86,
+        22,
+        23,
+        22,
+        27,
+        22,
+        29,
+        24,
+        31,
+        27,
+        29,
+        31,
+        29,
+        24
+      ],
+      "hit_rank": 1,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q010",
+      "type": "multi_hop",
+      "question": "拍摄画面和播放画面上的触摸功能图标显示方式有什么不同？",
+      "gold_pages": [
+        48,
+        49
+      ],
+      "retrieved_pages_top20": [
+        54,
+        52,
+        48,
+        48,
+        54,
+        122,
+        49,
+        54,
+        48,
+        97,
+        65,
+        59,
+        94,
+        38,
+        51,
+        46,
+        60,
+        97,
+        64,
+        114
+      ],
+      "hit_rank": 3,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q011",
+      "type": "keyword_exact",
+      "question": "FE 28-60mm F4-5.6的滤镜直径是多少？",
+      "gold_pages": [
+        50
+      ],
+      "retrieved_pages_top20": [
+        125,
+        113,
+        127,
+        49,
+        50,
+        25,
+        31,
+        143,
+        71,
+        46,
+        34,
+        40,
+        34,
+        115,
+        50,
+        36,
+        24,
+        126,
+        90,
+        95
+      ],
+      "hit_rank": 5,
+      "recall_at_5": true,
+      "recall_at_20": true
+    },
+    {
+      "qid": "q012",
+      "type": "negative",
+      "question": "这台相机支持8K视频录制吗？",
+      "gold_pages": [],
+      "generated_answer": "文档中未提及相关信息。",
+      "abstained": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{"qid": "q001", "question": "如何安装握柄？", "gold_pages": [44], "gold_answer": "将握柄上的定位销对准相机底部的定位销孔，一边将相机固定螺丝推入三脚架螺丝孔，一边旋转并拧紧", "type": "fact_lookup", "in_dev_range": true}
+{"qid": "q002", "question": "如何隐藏触摸功能图标？", "gold_pages": [48, 54], "gold_answer": "请按照与使图标出现时相反的滑动方向在屏幕上滑动", "type": "fact_lookup", "in_dev_range": true}
+{"qid": "q003", "question": "FE 28-60mm F4-5.6的35mm等效焦距是多少？", "gold_pages": [50], "gold_answer": "42-90mm", "type": "keyword_exact", "in_dev_range": true}
+{"qid": "q004", "question": "如何显示拍摄设置的列表？", "gold_pages": [60, 62], "gold_answer": "选择菜单画面上的（主）选项卡以显示拍摄设置的列表", "type": "fact_lookup", "in_dev_range": true}
+{"qid": "q005", "question": "如何使用USB-PD兼容设备对电池进行充电？", "gold_pages": [80], "gold_answer": "关闭相机，使用USB Type-C连接线（USB-C–USB-C）将相机的USB Type-C端子连接至兼容USB-PD（USB供电）的设备", "type": "fact_lookup", "in_dev_range": true}
+{"qid": "q006", "question": "如何使用触摸功能图标进行拍摄？", "gold_pages": [97], "gold_answer": "在显示屏上滑动以显示触摸功能图标，触摸（开始录制）图标即可开始拍摄，无需按MOVIE按钮", "type": "fact_lookup", "in_dev_range": true}
+{"qid": "q007", "question": "怎么清理CMOS？", "gold_pages": [32, 33], "gold_answer": "确认电池电量为51%或以上，MENU→（设置）→［设置选项］→［防尘功能］→［传感器清洁］→［确定］，取下镜头，用市售气吹清洁影像传感器表面，禁止使用喷雾式气吹", "type": "fact_lookup", "in_dev_range": true}
+{"qid": "q008", "question": "这台相机能录制10倍慢动作视频吗？", "gold_pages": [], "gold_answer": "文档未提及该相机支持10倍慢动作录制", "type": "negative", "in_dev_range": true}
+{"qid": "q009", "question": "拍视频拍到相机过热了，相机和存储卡分别要怎么处理？", "gold_pages": [31, 98], "gold_answer": "相机出现过热警告图标时应关闭电源待其冷却；存储卡显示过热警告图标时不要立即取出存储卡，应先关闭相机再等待片刻后取出", "type": "multi_hop", "in_dev_range": true}
+{"qid": "q010", "question": "拍摄画面和播放画面上的触摸功能图标显示方式有什么不同？", "gold_pages": [48, 49], "gold_answer": "拍摄画面的触摸功能图标需要向左右滑动才出现，可反向滑动隐藏；播放画面在对应设置开启后触摸功能图标会始终显示", "type": "multi_hop", "in_dev_range": true}
+{"qid": "q011", "question": "FE 28-60mm F4-5.6的滤镜直径是多少？", "gold_pages": [50], "gold_answer": "40.5mm", "type": "keyword_exact", "in_dev_range": true}
+{"qid": "q012", "question": "这台相机支持8K视频录制吗？", "gold_pages": [], "gold_answer": "文档未提及8K，仅涉及4K相关内容", "type": "negative", "in_dev_range": true}
