@@ -1,0 +1,13 @@
+pymupdf
+llama-index-core
+chromadb
+rank-bm25
+jieba
+sentence-transformers
+openai
+python-dotenv
+pyyaml
+tqdm
+fastapi
+uvicorn
+rich

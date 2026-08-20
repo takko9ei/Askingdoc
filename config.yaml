@@ -1,0 +1,47 @@
+# Askingdoc central configuration.
+#
+# Every tunable parameter for the pipeline lives here -- nothing should be
+# hardcoded inside src/ or eval/. Secrets (API keys) are the one exception:
+# they live only in .env (see .env.example), never in this file, so this
+# file is safe to commit.
+#
+# The "{suffix}" placeholder below is resolved by src/config.py at load
+# time: "_dev" when dev.enabled is true, "" (empty) when false. That one
+# substitution is what keeps the dev (150-page) and full (whole document)
+# datasets from ever colliding in storage or in the Chroma collection.
+
+dev:
+  enabled: true          # ★ global switch -- flip to false in STEP6
+  max_pages: 150          # dev mode only processes the first N pages
+  suffix: "_dev"          # appended to every path/collection name in dev mode
+
+paths:
+  pdf: data/target.pdf
+  blocks: storage/blocks{suffix}.jsonl
+  parents: storage/parents{suffix}.jsonl
+  children: storage/children{suffix}.jsonl
+  chroma_dir: storage/chroma
+  bm25: storage/bm25{suffix}.pkl
+
+index:
+  collection_name: askingdoc{suffix}
+
+chunking:
+  parent_size: 1500
+  child_size: 300
+  overlap: 50
+
+retrieval:
+  use_bm25: false
+  use_rerank: false
+  use_small_to_big: false
+  rrf_k: 60
+  recall_top_k: 20
+  final_top_k: 5
+  rerank_batch: 8
+
+models:
+  embedding: BAAI/bge-m3
+  embedding_dim: 1024
+  llm: deepseek-v4-flash
+  reranker: BAAI/bge-reranker-v2-m3

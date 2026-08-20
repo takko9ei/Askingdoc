@@ -36,6 +36,18 @@ embedding API / bge-reranker-v2-m3 / FastAPI
 4. **`page_no` 必须在 STEP1（PDF 解析）就保存，且必须是 PDF 原始页码**，
    即使 dev 模式只处理前 150 页也不能重新编号——否则引用溯源做不了，
    STEP6 切 full 时评测集 `gold_pages` 会全部错位。
+5. **模型固定，不擅自更换**：凡涉及 embedding 的地方（`config.yaml` 的
+   `models.embedding`、indexer 的向量化调用、search 的 query 向量化）一律用
+   `BAAI/bge-m3`（向量维度 1024）；凡涉及 LLM 生成的地方（`config.yaml` 的
+   `models.llm`、`answerer.py` 的生成调用）一律用 `deepseek-v4-flash`。
+   写代码、写提示词示例、写文档举例时都用这两个名字，除非用户明确说要换模型。
+6. **密钥只从 `.env` 拿，不允许硬编码或写进 `config.yaml`**：任何要用到
+   API key / base_url 的代码（embedding 调用、LLM 调用），一律通过
+   `src/config.py` 的 `load_config()` 取 `Config.embedding_api_key` /
+   `embedding_base_url` / `llm_api_key` / `llm_base_url` 这四个字段，
+   不要在新模块里自己重新 `load_dotenv()` 或读 `os.environ`，
+   也不要把真实 key/url 写进代码、`config.yaml` 或对话里贴出来。
+   `.env` 已在 `.gitignore` 里，`.env.example` 是给别人看的空模板。
 
 ---
 
@@ -136,3 +148,23 @@ embedding API / bge-reranker-v2-m3 / FastAPI
   [Askingdoc_dev_playbook_v2.md](Askingdoc_dev_playbook_v2.md)（同目录）
 - 每次实现新 STEP 前，先定位 playbook 里对应章节，把提示词内容当作实现规格，
   不要凭记忆改写，尤其【改动范围】和【严禁修改】部分要逐字遵守
+
+## 9. 其他规则
+
+- 每次启动前必读claude.md
+- 每一轮对话，请在提示词以外，读取以下内容：
+【项目背景】
+Askingdoc：长文档 RAG 问答系统，个人项目，一周工期。
+技术栈：Python 3.11 / PyMuPDF / LlamaIndex(仅切分) / ChromaDB / rank_bm25 /
+       embedding API / bge-reranker-v2-m3 / FastAPI
+设计原则：
+- 检索链路手写，不用框架高层抽象
+- 四个消融开关由 config.yaml 控制，一份代码跑四种配置
+- 双数据集模式：dev(前150页) 与 full(全量) 共用同一份代码，
+  仅由 config.dev.enabled 切换，禁止写两套逻辑
+
+【代码规范】
+- 注释和 docstring 用英文，要具体不要复述函数名
+- 路径用 pathlib
+- 关键中间结果打印出来便于调试
+- 生成后请逐行解释关键逻辑的工作原理
