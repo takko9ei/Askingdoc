@@ -117,8 +117,24 @@ embedding API / bge-reranker-v2-m3 / FastAPI
 - 次要发现：`c_0001`/`c_0002` 这类"目录式 child 话题混杂导致向量语义模糊"的
   假阳性问题依然存在（与 small-to-big 矛盾同源），STEP4加BM25融合后需要
   重新观察这两类假阳性是否减少
-- 尚未 `git commit`（用户表示会自行处理 git，不需要 AI 代为提交）
-- 下一步：STEP3（手写12条评测题 + `eval/harness.py`），之后 `eval/` 锁死
+- **STEP3 已完成并锁定**：`eval/golden_qa.jsonl`（12条，6/2/2/2配比，用户手写8条+AI补4条并已知情确认）
+  和 `eval/harness.py`/`eval/configs.py`/`eval/compare.py` 都已实现，**`eval/` 目录之后严禁修改**。
+  dev baseline 首跑：Recall@5=90%, Recall@20=100%, MRR=0.710, Abstention=100%
+- **STEP4 Slice 4-1（BM25+RRF融合）已完成**：`src/retrieval/fusion.py`新建，`search.py`补上
+  `bm25_search`/`explain_fusion`。dev hybrid：Recall@5=100%（比baseline+10pp），
+  但MRR降到0.637——RRF融合会稀释向量检索本来排第1的题（真实案例：清理CMOS/显示拍摄设置列表）
+- **STEP4 Slice 4-2（Cross-Encoder重排）已完成**：`src/retrieval/reranker.py`新建，`search.py`补上
+  `rerank`/`explain_rerank`，`Hit`新增`rerank_score`字段。dev rerank：Recall@5回落到90%，
+  MRR微涨到0.641——重排修好了"清理CMOS"但搞砸了"触摸图标拍摄"（候选主题过于同质时Cross-Encoder
+  判别力不够精细）。四组配置(`baseline/hybrid/rerank/full`)结果已全部跑新、写入
+  `eval/results/dev_*.json`，`full`目前数字等同`rerank`（`use_small_to_big`还是TODO，符合预期）
+- 详细分析和逐题排名对比见 [docs/capability_log.md](docs/capability_log.md)（已有4个时间节的记录，
+  含"出借相机"案例的反转结论——当初误判为BM25问题，实际是索引覆盖率问题的余波）
+- 实现过程中修了一个真bug：`use_bm25`分支融合后未裁回`recall_top_k`，导致开BM25+重排时
+  候选数翻倍到38条、超3秒警告误触发，已在`search()`和`explain_rerank()`两处修复
+- 尚未 `git commit`（用户表示会自行处理 git，不需要 AI 代为提交）——当前有多个改动/新文件待提交：
+  `search.py`修改、新增`fusion.py`/`reranker.py`、`capability_log.md`更新、4个`eval/results/*.json`
+- 下一步：STEP4 Slice 4-2 已完成，下一步是 STEP5（small-to-big父块扩展 + 引用生成）
 
 进度请随实现推进更新本节（哪个 STEP/Slice 完成、关键数字如 Recall@5 等），
 方便后续对话快速对齐上下文，不必每次重新翻 playbook 全文。

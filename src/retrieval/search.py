@@ -12,10 +12,11 @@ flags" instead of four hand-maintained near-duplicates: eval/harness.py
 objects, so any difference in the resulting Recall@5/MRR numbers is
 guaranteed to come ONLY from the flag that changed.
 
-This slice implements just the unconditional first line (vector_search).
-The other three branches stay `pass` TODOs on purpose -- filling them in
-now would let this slice quietly do STEP4/5's work too, which breaks the
-per-step review discipline this project runs on (see CLAUDE.md section 4).
+STEP4 filled in the use_bm25 branch: bm25_search() (sparse retrieval) plus
+src/retrieval/fusion.py's rrf_fuse() combine with the dense vector_search()
+results above. This slice fills in use_rerank: src/retrieval/reranker.py's
+rerank() re-scores the (possibly fused) candidates with a Cross-Encoder.
+use_small_to_big stays a `pass` TODO for STEP5.
 
 Note on adapting the sketch skeleton to this project's actual Config shape:
 the playbook's pseudocode writes `cfg.use_bm25` / `cfg.recall_top_k`
@@ -28,12 +29,24 @@ typed Config dataclass.
 
 from __future__ import annotations
 
+import json
+import pickle
 from dataclasses import dataclass
 
 import chromadb
 from openai import OpenAI
+from rank_bm25 import BM25Okapi
 
-from src.config import Config
+from src.config import Config, load_config
+from src.ingest.tokenizer import tokenize
+
+# NOTE: src.retrieval.fusion.rrf_fuse and src.retrieval.reranker.rerank are
+# both imported locally inside the functions that use them (search(),
+# explain_fusion(), explain_rerank()), not at module level here. Both
+# fusion.py and reranker.py import Hit from this module -- a top-level
+# import in both directions would be a circular import. Deferring this one
+# side to function-call time breaks the cycle without needing to move Hit
+# into a third module.
 
 
 @dataclass
@@ -52,6 +65,11 @@ class Hit:
     page_no: int
     score: float
     parent_id: str
+    # Set only after reranking (src/retrieval/reranker.py); None otherwise.
+    # Kept SEPARATE from `score` (rather than overwriting it) so a reranked
+    # Hit still carries its pre-rerank score for comparison/debugging --
+    # explain_rerank() below prints both side by side.
+    rerank_score: float | None = None
 
 
 # --- module-level singletons ---------------------------------------------
@@ -71,6 +89,9 @@ class Hit:
 _chroma_clients: dict[str, chromadb.ClientAPI] = {}
 _collections: dict[str, chromadb.Collection] = {}
 _embedding_clients: dict[tuple, OpenAI] = {}
+_bm25_indices: dict[str, BM25Okapi] = {}
+_bm25_cids: dict[str, list[str]] = {}
+_children_maps: dict[str, dict[str, dict]] = {}
 
 
 def _collection_for(cfg: Config) -> chromadb.Collection:
@@ -101,6 +122,48 @@ def _embedding_client_for(cfg: Config) -> OpenAI:
     return _embedding_clients[fingerprint]
 
 
+def _bm25_index_for(cfg: Config) -> tuple[BM25Okapi, list[str]]:
+    """Return the (cached) BM25Okapi index + its parallel cids list for
+    cfg.paths.bm25.
+
+    Rebuilding BM25Okapi from the pickled tokenized corpus is cheap (a
+    fraction of a second even at full-document scale -- see
+    src/ingest/indexer.py's build_bm25_index docstring for why only the
+    tokenized corpus is persisted, not a pickled BM25Okapi object), but
+    still wasteful to redo on every single query in a process that answers
+    many questions in a row -- same rationale as the Chroma/embedding
+    caches above. Fingerprinted on cfg.paths.bm25 (already dev/full-
+    isolated via the {suffix} mechanism), so this coexists safely with a
+    dev cache slot and a full cache slot in the same process.
+    """
+    fingerprint = str(cfg.paths.bm25)
+    if fingerprint not in _bm25_indices:
+        with cfg.paths.bm25.open("rb") as f:
+            data = pickle.load(f)
+        _bm25_indices[fingerprint] = BM25Okapi(data["corpus_tokens"])
+        _bm25_cids[fingerprint] = data["cids"]
+    return _bm25_indices[fingerprint], _bm25_cids[fingerprint]
+
+
+def _children_map_for(cfg: Config) -> dict[str, dict]:
+    """Return the (cached) cid -> child-record map for cfg.paths.children.
+
+    BM25's get_scores() only knows about token overlap -- it returns a
+    score per corpus position, not text/page_no/parent_id. This map is
+    what turns a bare cid back into a full Hit, mirroring what ChromaDB's
+    metadata/documents fields already give vector_search for free (the
+    vector index stores that data alongside each embedding; the BM25
+    pickle deliberately does not, see indexer.py, so this file has to look
+    it up separately).
+    """
+    fingerprint = str(cfg.paths.children)
+    if fingerprint not in _children_maps:
+        with cfg.paths.children.open("r", encoding="utf-8") as f:
+            children = [json.loads(line) for line in f]
+        _children_maps[fingerprint] = {c["cid"]: c for c in children}
+    return _children_maps[fingerprint]
+
+
 def reset_clients() -> None:
     """Drop every cached client/collection handle.
 
@@ -118,6 +181,9 @@ def reset_clients() -> None:
     _chroma_clients.clear()
     _collections.clear()
     _embedding_clients.clear()
+    _bm25_indices.clear()
+    _bm25_cids.clear()
+    _children_maps.clear()
 
 
 def vector_search(query: str, cfg: Config, top_k: int) -> list[Hit]:
@@ -165,6 +231,60 @@ def vector_search(query: str, cfg: Config, top_k: int) -> list[Hit]:
     return hits
 
 
+def bm25_search(query: str, cfg: Config, top_k: int) -> list[Hit]:
+    """Keyword search over the same child corpus vector_search uses,
+    returning the top_k highest-BM25-score children.
+
+    【关键约束】`query` is tokenized with the exact same tokenize() function
+    (src/ingest/tokenizer.py) that src/ingest/indexer.py used to build
+    corpus_tokens at index time. BM25 matches purely on token-string
+    equality -- if this called a different tokenizer, or the same
+    tokenizer with different settings, tokens that are "the same word" to
+    a human could come out as different strings here vs. in the index,
+    and every query would silently underperform with no error anywhere
+    to explain why. This is not a style preference; it's a correctness
+    requirement enforced by importing the one shared function rather than
+    writing tokenization logic locally.
+
+    Score conversion: BM25's raw score is unbounded (depends on term
+    rarity and document length -- see this project's own STEP4 idf
+    inspection, where values ranged ~0.5 to ~2.0 on a 20-doc sample and
+    grow with corpus size), so unlike vector_search's score (normalized to
+    a ~0-1 cosine similarity), Hit.score here is the raw BM25 score
+    AS-IS. This is fine specifically because BM25 hits are never compared
+    to vector hits by score -- rrf_fuse() combines the two lists by RANK,
+    exactly to avoid needing them on a common scale.
+    """
+    bm25_index, cids = _bm25_index_for(cfg)
+    children_map = _children_map_for(cfg)
+
+    query_tokens = tokenize(query)
+    scores = bm25_index.get_scores(query_tokens)
+
+    ranked = sorted(zip(cids, scores), key=lambda pair: -pair[1])[:top_k]
+
+    hits: list[Hit] = []
+    for cid, score in ranked:
+        child = children_map.get(cid)
+        if child is None:
+            # Defensive only -- bm25.pkl and children.jsonl are both built
+            # from the same children list by indexer.py in the same run,
+            # so they should never disagree. Skip rather than crash if
+            # they ever do drift out of sync (e.g. a stale bm25.pkl from
+            # before a chunking parameter change).
+            continue
+        hits.append(
+            Hit(
+                cid=cid,
+                text=child["text"],
+                page_no=child["page_no"],
+                score=float(score),
+                parent_id=child["parent_id"],
+            )
+        )
+    return hits
+
+
 def search(query: str, cfg: Config) -> list[Hit]:
     """The project's single retrieval entry point. Every ablation
     configuration (baseline/hybrid/rerank/full) runs through this exact
@@ -175,10 +295,25 @@ def search(query: str, cfg: Config) -> list[Hit]:
     hits = vector_search(query, cfg, top_k=cfg.retrieval.recall_top_k)
 
     if cfg.retrieval.use_bm25:
-        pass  # TODO STEP4: BM25 recall (src/ingest/tokenizer.tokenize) + RRF fusion with the hits above
+        from src.retrieval.fusion import rrf_fuse  # local import: see module import comment
+
+        sparse_hits = bm25_search(query, cfg, top_k=cfg.retrieval.recall_top_k)
+        hits = rrf_fuse(hits, sparse_hits, k=cfg.retrieval.rrf_k)
+        # rrf_fuse returns the UNION of both lists (up to 2 * recall_top_k
+        # if dense and sparse barely overlap), not capped at recall_top_k --
+        # truncate back down here so recall_top_k means the same thing
+        # ("how many candidates move on to ranking") whether or not BM25
+        # fusion is on. Without this, enabling both use_bm25 and use_rerank
+        # together silently reranks up to ~2x as many pairs as intended
+        # (observed: 38 pairs instead of 20 on a real query), which is
+        # exactly the "候选数太大" cost this STEP's 【输出后请解释】 answer #3
+        # discusses.
+        hits = hits[: cfg.retrieval.recall_top_k]
 
     if cfg.retrieval.use_rerank:
-        pass  # TODO STEP4: Cross-Encoder rerank of the (possibly fused) candidates
+        from src.retrieval.reranker import rerank  # local import: see module import comment
+
+        hits = rerank(query, hits, cfg)
 
     hits = hits[: cfg.retrieval.final_top_k]
 
@@ -186,3 +321,103 @@ def search(query: str, cfg: Config) -> list[Hit]:
         pass  # TODO STEP5: swap each child Hit for its parent, dedup by parent_id, keep max score
 
     return hits
+
+
+def explain_fusion(query: str, cfg: Config | None = None) -> None:
+    """Debug helper: print the dense (vector) top-10, the sparse (BM25)
+    top-10, and the RRF-fused top-10 side by side, labeling each fused
+    result with which path(s) it came from and its original rank(s)
+    there.
+
+    Use this on a keyword_exact golden_qa question to build direct
+    intuition for what RRF actually does -- e.g. "识别优先级设置"
+    (docs/capability_log.md): a menu-index page PyMuPDF mangled into
+    unparseable prose, where dense search finds nothing usable but BM25's
+    literal "优先级设置" substring match should surface it, and the fused
+    ranking should show that rescue happening.
+    """
+    cfg = cfg or load_config()
+    from src.retrieval.fusion import rrf_fuse  # local import: see module import comment
+
+    dense_hits = vector_search(query, cfg, top_k=10)
+    sparse_hits = bm25_search(query, cfg, top_k=10)
+    fused = rrf_fuse(dense_hits, sparse_hits, k=cfg.retrieval.rrf_k)[:10]
+
+    dense_rank = {h.cid: r for r, h in enumerate(dense_hits, start=1)}
+    sparse_rank = {h.cid: r for r, h in enumerate(sparse_hits, start=1)}
+
+    print(f"--- explain_fusion: {query!r} ---")
+
+    print("\n[dense/vector top-10]")
+    for r, h in enumerate(dense_hits, start=1):
+        print(f"  #{r:2d} {h.cid}  page={h.page_no:>3}  score={h.score:.3f}")
+
+    print("\n[sparse/BM25 top-10]")
+    for r, h in enumerate(sparse_hits, start=1):
+        print(f"  #{r:2d} {h.cid}  page={h.page_no:>3}  score={h.score:.3f}")
+
+    print(f"\n[fused top-10 (RRF, k={cfg.retrieval.rrf_k})]")
+    for r, h in enumerate(fused, start=1):
+        d_rank = dense_rank.get(h.cid)
+        s_rank = sparse_rank.get(h.cid)
+        sources = []
+        if d_rank:
+            sources.append(f"dense#{d_rank}")
+        if s_rank:
+            sources.append(f"sparse#{s_rank}")
+        print(f"  #{r:2d} {h.cid}  page={h.page_no:>3}  rrf_score={h.score:.4f}  from={'+'.join(sources)}")
+
+
+def explain_rerank(query: str, cfg: Config | None = None) -> None:
+    """Debug helper: run the SAME recall pipeline search() itself would use
+    (vector-only, or vector+BM25 fusion if cfg.retrieval.use_bm25 is on),
+    then rerank it, and print a before/after top-10 comparison -- original
+    rank, new rank, original score, rerank_score -- with the biggest
+    rank-change entries called out separately.
+
+    Use this on a question where the recall stage's own ordering looked
+    "off" -- e.g. docs/capability_log.md's "怎么清理CMOS" and "如何显示拍摄
+    设置的列表", both of which dropped from rank 1 (vector-only) to rank
+    2-3 once RRF fusion mixed in BM25's disagreeing order (see STEP4
+    Slice 4-1's capability_log entry) -- to see concretely whether the
+    Cross-Encoder's joint (query, document) reading restores them to
+    rank 1, independent of what either recall path's score said.
+    """
+    cfg = cfg or load_config()
+    from src.retrieval.reranker import rerank  # local import: see module import comment
+
+    hits = vector_search(query, cfg, top_k=cfg.retrieval.recall_top_k)
+    if cfg.retrieval.use_bm25:
+        from src.retrieval.fusion import rrf_fuse  # local import: see module import comment
+
+        sparse_hits = bm25_search(query, cfg, top_k=cfg.retrieval.recall_top_k)
+        hits = rrf_fuse(hits, sparse_hits, k=cfg.retrieval.rrf_k)
+        hits = hits[: cfg.retrieval.recall_top_k]  # mirror search()'s post-fusion truncation, see its comment
+
+    before = hits[:10]
+    reranked = rerank(query, hits, cfg)[:10]
+    before_rank = {h.cid: r for r, h in enumerate(before, start=1)}
+
+    print(f"--- explain_rerank: {query!r} ---")
+
+    print("\n[before rerank, top-10]")
+    for r, h in enumerate(before, start=1):
+        print(f"  #{r:2d} {h.cid}  page={h.page_no:>3}  score={h.score:.3f}")
+
+    print("\n[after rerank, top-10]")
+    changes: list[tuple[int | None, Hit, int | None, int]] = []
+    for new_rank, h in enumerate(reranked, start=1):
+        old_rank = before_rank.get(h.cid)
+        delta = (old_rank - new_rank) if old_rank else None
+        changes.append((delta, h, old_rank, new_rank))
+        old_rank_str = str(old_rank) if old_rank else "not in top-10"
+        print(
+            f"  #{new_rank:2d} {h.cid}  page={h.page_no:>3}  old_rank={old_rank_str:>13}  "
+            f"score={h.score:.3f}  rerank_score={h.rerank_score:.3f}"
+        )
+
+    print("\n[biggest rank changes]")
+    ranked_changes = sorted((c for c in changes if c[0] is not None), key=lambda c: -abs(c[0]))
+    for delta, h, old_rank, new_rank in ranked_changes[:5]:
+        direction = "up" if delta > 0 else "down"
+        print(f"  {h.cid} (page={h.page_no}): rank {old_rank} -> {new_rank} ({direction} {abs(delta)})")
