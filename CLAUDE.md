@@ -1,204 +1,176 @@
-# Askingdoc — 项目工作指南（供后续轮次使用）
+# Askingdoc — 项目宪法
 
-> 本文件是根据 `Askingdoc_dev_playbook_v2.md`（下称"playbook"）提炼的工作契约。
-> playbook 是每一步**提示词的权威原文**，遇到细节冲突以 playbook 为准；
-> 本文件负责：项目全局约束 + 每次交互的协作方式 + 当前进度追踪。
-
----
-
-## 1. 项目是什么
-
-Askingdoc：长文档 RAG（检索增强生成）问答系统。个人项目，一周工期（9 个 STEP）。
-输入是一本 300–600 页、带文本层的 PDF（相机说明书），目标是让用户提问后，系统从文档里
-检索相关片段、生成带**页码引用**的答案，并能拒答文档未覆盖的问题。
-
-**技术栈**：Python 3.12 / PyMuPDF / LlamaIndex（仅用于切分）/ ChromaDB / rank_bm25 /
-embedding API / bge-reranker-v2-m3 / FastAPI
-
-**用户身份**：项目所有者是 RAG 领域的初学者，做这个项目的目的除了交付作品，
-也是**通过亲手实现来学懂 RAG 全套流程**（解析→切分→向量化→检索→融合→重排→生成→引用）。
-这一点决定了下面第 4 节的协作方式，比代码规范更重要，不要跳过。
+> 本文件是给接手这个项目的 AI 看的规则文档，写的是**不随进度变化的规则**。
+> 当前进度、已完成模块、待办事项在 [PROGRESS.md](PROGRESS.md)；
+> 技术决策的完整"问题→方案→代价"论述在 [docs/DECISIONS.md](docs/DECISIONS.md)；
+> 每一步详细的"①原理②手动任务③提示词"在
+> [Askingdoc_dev_playbook_v2.md](Askingdoc_dev_playbook_v2.md)（原始规格，仍是权威原文）。
+> 三份文档职责不重叠：这份讲"不能做什么"，PROGRESS 讲"做到哪了"，DECISIONS 讲"为什么这么做"。
 
 ---
 
-## 2. 设计原则（不可违反）
+## 1. 项目定位
 
-1. **检索链路手写，不用框架高层抽象**。LlamaIndex 只用来做 SentenceSplitter 切分，
-   检索、融合、重排、生成全部自己写。这是为了能在面试里讲清楚每一步原理。
-2. **四个消融开关（use_bm25 / use_rerank / use_small_to_big + 隐含的 baseline）
-   全部由 `config.yaml` 控制，一份代码跑四种配置**。`src/retrieval/search.py` 里
-   `search()` 函数按 STEP2 定的骨架（四个 if 分支）填充，不要为不同配置写不同函数。
-3. **双数据集模式（dev / full）共用同一份代码**，仅由 `config.dev.enabled` 切换：
-   - dev：前 150 页，独立 chroma 集合 `askingdoc_dev`，独立 `bm25_dev.pkl`，12→之后补到 20 条评测题
-   - full：全量页数，正式集合 `askingdoc`，正式 `bm25.pkl`
-   - 所有路径 / 集合名通过 `{suffix}` 占位符自动区分（`_dev` 或空字符串），
-     **绝不允许出现"dev 版代码"和"正式版代码"两套逻辑**
-4. **`page_no` 必须在 STEP1（PDF 解析）就保存，且必须是 PDF 原始页码**，
-   即使 dev 模式只处理前 150 页也不能重新编号——否则引用溯源做不了，
-   STEP6 切 full 时评测集 `gold_pages` 会全部错位。
-5. **模型固定，不擅自更换**：凡涉及 embedding 的地方（`config.yaml` 的
-   `models.embedding`、indexer 的向量化调用、search 的 query 向量化）一律用
-   `BAAI/bge-m3`（向量维度 1024）；凡涉及 LLM 生成的地方（`config.yaml` 的
-   `models.llm`、`answerer.py` 的生成调用）一律用 `deepseek-v4-flash`。
-   写代码、写提示词示例、写文档举例时都用这两个名字，除非用户明确说要换模型。
-6. **密钥只从 `.env` 拿，不允许硬编码或写进 `config.yaml`**：任何要用到
-   API key / base_url 的代码（embedding 调用、LLM 调用），一律通过
-   `src/config.py` 的 `load_config()` 取 `Config.embedding_api_key` /
-   `embedding_base_url` / `llm_api_key` / `llm_base_url` 这四个字段，
-   不要在新模块里自己重新 `load_dotenv()` 或读 `os.environ`，
-   也不要把真实 key/url 写进代码、`config.yaml` 或对话里贴出来。
-   `.env` 已在 `.gitignore` 里，`.env.example` 是给别人看的空模板。
+Askingdoc 是一个长文档 RAG（检索增强生成）问答系统，个人 portfolio 项目，一周工期（9 个 STEP）。
+
+面向数百页带文本层的技术文档（当前用例：一本 576 页的相机说明书），目标是让用户提问后，
+系统从文档里检索相关片段、生成**带页码引用**的答案，并能对文档未覆盖的问题正确拒答。
+
+**这个项目的核心交付物是四组消融实验数据（baseline/hybrid/rerank/full 各自的
+Recall@5/Recall@20/MRR/Abstention Rate），不是功能数量。** 每加一个检索模块
+（BM25、重排、small-to-big）都必须能用数字证明它有没有用——这是项目存在的意义，
+也是评价"这一步做完了没有"的标准：光是代码跑通不算完成，必须有对应的评测数字。
 
 ---
 
-## 3. 代码规范
+## 2. 技术栈与选型理由
+
+| 技术 | 用途 | 为什么选它 |
+|---|---|---|
+| Python 3.12 | 语言 | playbook 原定 3.11，环境搭建时已升级到 3.12，向后兼容无冲突 |
+| PyMuPDF (pymupdf) | PDF 解析 | `get_text("blocks")` 模式自带版面块划分和坐标，不用自己实现版面分析 |
+| LlamaIndex（仅 `SentenceSplitter`） | child 层切分 | 句子边界切分是成熟问题，不重复造轮子；但检索/融合/重排/生成全部手写，见【铁律】 |
+| ChromaDB | 向量存储 | 本地持久化、无需额外部署数据库服务，`PersistentClient` 直接落盘 |
+| rank_bm25 + jieba | 关键词检索 | 轻量、纯 Python、无需额外服务；jieba 处理中文分词，见【铁律】的 tokenize 约束 |
+| BAAI/bge-m3（通过硅基流动 API） | embedding | 中文效果好、1024 维、有稳定 OpenAI 兼容 API，不用本地跑 embedding 模型 |
+| BAAI/bge-reranker-v2-m3（本地） | 精排 | Cross-Encoder 重排必须读取候选原文，用 API 调用每次都要传全文本，本地跑更省成本也更快 |
+| DeepSeek（deepseek-v4-flash） | 生成 | 中文能力强、成本低，适合个人项目预算 |
+| FastAPI | STEP7 的 API 服务 | 自带 `/docs` 交互页面，面试展示比贴代码直观（尚未实现，见 PROGRESS.md） |
+
+---
+
+## 3.【铁律】—— 不可违反，改动前必须重新确认
+
+> **这一节是本文件最重要的部分。任何 STEP 的实现都不能违反下面任何一条。**
+
+### 🔒 `eval/harness.py` 和 `eval/golden_qa.jsonl` 已锁定
+STEP3 完成后即锁死。**任何改动都会让已有的四组消融数据失去可比性**——评测代码或
+评测题一变，之前跑出的 Recall@5/MRR 数字就不再是"同一把尺子"量出来的，STEP4/5
+已经用这把尺子测出的数据全部作废。**禁止修改这两个文件，包括"看起来只是小修小补"的改动。**
+后续任何 STEP 的提示词都必须带"严禁修改 eval/"。
+
+### 🔒 检索链路必须手写，不用框架高层抽象（LlamaIndex 的 QueryEngine/Chain 等）
+原因：
+1. 需要拿到检索的**中间结果**（每个候选的 cid/page_no/score）直接喂给 `eval/harness.py`
+   算 Recall@5/@20/MRR——高层抽象把这些中间状态封装掉了，测不到。
+2. 四个消融开关（`use_bm25`/`use_rerank`/`use_small_to_big`）需要能**单变量控制**，
+   高层框架的 pipeline 通常不支持这种细粒度开关组合。
+
+LlamaIndex 唯一被允许使用的地方是 `src/ingest/chunker.py` 里的 `SentenceSplitter`
+（纯文本切分，不涉及检索逻辑）。
+
+### 🔒 `page_no` 必须是 PDF 原始页码，不能重新编号
+`src/ingest/parser.py` 解析时，即使 dev 模式只截取前 150 页，页码也必须是
+PyMuPDF 原始页码 + 1（PyMuPDF 从 0 开始），**绝不能因为只处理了 150 页就从 1 重新编号**。
+一旦重新编号，STEP6 切到全量 576 页时，`eval/golden_qa.jsonl` 里所有 `gold_pages`
+全部错位，且**无法事后修复**（原始信息已经在解析阶段丢失）。
+
+### 🔒 dev 和 full 必须共用同一份代码
+仅由 `config.dev.enabled` 这一个布尔值切换，所有路径和 ChromaDB 集合名通过
+`{suffix}` 占位符自动隔离（`_dev` 或空字符串）。**禁止出现"dev 版函数"和
+"full 版函数"两套逻辑**——那样 STEP6 切换时会有大量不一致的风险。
+
+### 🔒 `search()` 必须返回结构化 `Hit` 列表，不能返回拼好的字符串
+`Hit` dataclass 字段：`cid, text, page_no, score, parent_id, rerank_score`
+（最后一个字段仅重排后有值，其余情况为 `None`）。原因：`eval/harness.py` 需要
+机械地读取 `hit.page_no` 去和 `gold_pages` 比对——如果返回的是"第87页提到..."
+这种拼好的字符串，评测代码就要用正则去抠页码，脆弱且容易出错。
+
+### 🔒 tokenize 函数只有一份，建索引和查询必须调同一个
+`src/ingest/tokenizer.py` 的 `tokenize()` 是全项目唯一的分词实现。
+`src/ingest/indexer.py`（建 BM25 索引）和 `src/retrieval/search.py` 的
+`bm25_search()`（查询时分词）**必须 import 同一个函数**，不允许任何一处
+自己重新写分词逻辑。不一致的后果：BM25 会**静默失效**——不报错，只是
+检索结果普遍不准，因为查询词和语料词的字符串对不上，这个 bug 极难排查。
+
+---
+
+## 4. 架构说明
+
+```
+离线 ingest 流水线：
+  PDF (带页码的文本层)
+    │  src/ingest/parser.py — PyMuPDF get_text("blocks")
+    ▼
+  blocks (每条带原始 page_no，噪声过滤后)
+    │  src/ingest/chunker.py — 顺序累积 blocks 成 parent (~1500 token)
+    │                          再用 LlamaIndex SentenceSplitter 切 child (~300 token)
+    ▼
+  parent (完整上下文，供生成用) ──┐  child (精确聚焦，供检索用)
+                                  │       │
+                                  │       ▼  src/ingest/indexer.py
+                                  │   ChromaDB(向量) + bm25.pkl(词，仅存分词结果)
+                                  │
+                                  └─── (STEP5 才用到，small-to-big 扩展时换回 parent)
+
+在线 query 流水线（src/retrieval/search.py 的 search()）：
+  query
+    │  vector_search() — 向量召回 top-20（无条件执行）
+    ▼
+  [if use_bm25]   bm25_search() + fusion.py 的 rrf_fuse() 融合 BM25 top-20
+    ▼
+  [if use_rerank] reranker.py 的 rerank() 用 Cross-Encoder 精排，截到 final_top_k(5)
+    ▼
+  [if use_small_to_big]  child → 对应 parent 扩展，去重补足（STEP5，尚未实现）
+    ▼
+  src/generation/answerer.py 的 answer() — 拼 prompt，调 LLM，生成带页码引用的回答
+```
+
+三个方括号是消融开关，均由 `config.retrieval.*` 的布尔值控制，四种组合对应
+`eval/configs.py` 的 `baseline`/`hybrid`/`rerank`/`full` 四组预设。
+
+---
+
+## 5. 双数据集机制
+
+`config.dev.enabled` 决定 `{suffix}` 是 `"_dev"` 还是 `""`，`src/config.py` 的
+`load_config()` 在读取 `config.yaml` 后立即解析这个占位符，所有 `paths.*` 和
+`index.collection_name` 据此自动隔离，物理上不共享同一份存储/集合。
+
+| | dev | full |
+|---|---|---|
+| 页数 | 前 150 页 | 全量 576 页 |
+| 评测题数 | 12 条（`in_dev_range=true`） | 20 条（STEP6 补到 20，全部跑） |
+| 结果文件 | `eval/results/dev_*.json` | `eval/results/full_*.json`（尚不存在） |
+| chroma 集合 | `askingdoc_dev` | `askingdoc` |
+
+`load_config(overrides: dict)` 支持点号路径覆盖任意配置项，同时服务于两个场景：
+消融实验（`eval/configs.py` 切 `retrieval.*` 开关）和 dev/full 切换
+（STEP6 切 `dev.enabled`）——不是两套机制，是同一个函数的两种用法。
+
+---
+
+## 6. 代码规范
 
 - 注释和 docstring 用英文，要**具体说明逻辑/原因**，不要复述函数名
 - 路径一律用 `pathlib`，不用字符串拼接
 - 关键中间结果要打印出来（统计量、样本抽查），便于调试和人工核验
-- 每次交付代码后，**逐行解释关键逻辑的工作原理**（不是整体概述，是挑关键行讲清楚"为什么这样写"）
-- 每个 STEP 的提示词末尾都有【输出后请解释】几个具体问题，**必须逐条回答**，
-  这是用户学习 RAG 原理的主要途径，不能省略或一笔带过
+- 每个模块级单例（chroma client、bm25 index、reranker 等）都要提供 `reset_*()`
+  函数——不是可选项，是双模式切换和长进程复用场景下的硬需求
 
 ---
 
-## 4. 每一步的协作方式（本项目最重要的约定）
+## 7. 协作方式
 
-用户是 RAG 初学者，希望**边做边学懂原理**，而不是拿到一堆能跑的代码就完事。
-因此对 playbook 里的**每一个 STEP / 每一个 Slice**，交互都按两步走，不能合并、不能跳步：
+**每次任务明确改动范围，不越界修改其他文件；单个问题卡住超 60 分钟就降级实现
+或标记为已知限制，不要死磕。**
 
-**第一步：讲清楚"这步在干什么、怎么干的"**
-- 用大白话讲这一步在 RAG 全局流程里的位置（解析？切分？索引？检索？融合？重排？生成？）
-- 讲清楚要解决什么矛盾/问题（例如 small-to-big 解决"检索要小块、生成要大块"的矛盾）
-- 可以直接引用 playbook 该 STEP 的"① 这步在干什么"内容，但要用自己的话讲透，
-  不是原文照搬；必要时举例子（结合相机说明书这个具体场景）
-- 讲清楚"② 你要手动做什么"里哪些事需要用户亲自动手（人工抽查、手写评测题等），
-  并说明**为什么这一步不能交给 AI**（playbook 里通常写了原因，比如评测题让 AI 生成会同源导致 Recall 虚高）
+补充这个项目实际验证有效、建议延续的工作习惯（不是新规则，是过去开发中形成的模式）：
 
-**第二步：实现 playbook 该 STEP/Slice 的③提示词内容**
-- 严格按提示词里的【改动范围】执行，不越界修改其他文件
-- 严格遵守【严禁修改 xxx】类约束（尤其 STEP3 之后 `eval/harness.py` 和
-  `eval/golden_qa.jsonl` 锁死，任何 STEP 都不能碰）
-- 实现完，逐条回答提示词末尾【输出后请解释】的问题
-- 给出这一步的验收方法（playbook 里"**验收**"部分写了怎么跑、该看到什么结果）
-
-**不要一次把多个 STEP 的代码都生成出来**——即使看到 playbook 后面步骤的内容，
-也只做用户当前明确要求的这一步，除非用户说"接下来几步一起做"。
-
-**每个 STEP 前后建议 `git commit`**（playbook 全局纪律第1条）。commit message
-用 playbook 里给的格式（如 `step0: skeleton with dev/full dual-dataset config`），
-但**只在用户确认要提交时才执行 `git commit`**（提交是有一定不可逆性的操作，按会话规则确认后再做）。
-
-**卡住超 60 分钟就降级**（换笨实现或写进 Known Limitations），不要死磕。
-
----
-
-## 5. 当前项目状态（2026-08-20 更新）
-
-- **STEP0-2 均已完成**，三颗雷已由用户自行处理，`.env` 已配置真实 embedding
-  （硅基流动 `BAAI/bge-m3`）和 llm（DeepSeek `deepseek-v4-flash`）密钥
-- STEP1：`storage/blocks_dev.jsonl` 已生成（150页，873块，平均块长53.6字符），
-  页码抽查通过（含 PDF 页脚数字佐证）
-- STEP2 Slice 2-1：`parents_dev.jsonl`(29条) / `children_dev.jsonl`(205条) 已生成，
-  跨页 parent 页码映射抽查通过
-- STEP2 Slice 2-2：`src/ingest/tokenizer.py` + `indexer.py` 已实现，
-  全量205条索引已跑完（详见下方 Slice 2-3 之后的记录）
-- STEP2 Slice 2-3：`search.py`/`prompts.py`/`answerer.py`/`cli.py` 已实现并端到端验证通过
-  （vector_search真实检索 + LLM真实生成 + CLI交互循环均已测试）。
-  `search()` 的 use_bm25/use_rerank/use_small_to_big 三个分支仍是 TODO，留给 STEP4/5
-- 用户已完成"自问建立手感"（6题，见 [docs/capability_log.md](docs/capability_log.md)），
-  并已跑 `python -m src.ingest.indexer` **补全全量205/205条索引**（185新增+20跳过，0失败）。
-  复测同一批6题：1对→4对+1部分对，**证实绝大多数"答不出"确实是索引覆盖率问题**，
-  补完后自然解决。剩余2个真实问题已分类记录：
-  (a) "识别优先级设置"——PDF解析层限制，第112-113页是超链接跳转目录，
-      被解析成乱麻文本，向量检索找不到但BM25大概率能找到（STEP4验证候选案例）
-  (b) "更换电池"——检索到了含答案的片段(page29)但生成没充分利用，
-      原因待定（生成综合能力 vs page29本身非标准步骤），留到STEP3/5回头看
-- 次要发现：`c_0001`/`c_0002` 这类"目录式 child 话题混杂导致向量语义模糊"的
-  假阳性问题依然存在（与 small-to-big 矛盾同源），STEP4加BM25融合后需要
-  重新观察这两类假阳性是否减少
-- **STEP3 已完成并锁定**：`eval/golden_qa.jsonl`（12条，6/2/2/2配比，用户手写8条+AI补4条并已知情确认）
-  和 `eval/harness.py`/`eval/configs.py`/`eval/compare.py` 都已实现，**`eval/` 目录之后严禁修改**。
-  dev baseline 首跑：Recall@5=90%, Recall@20=100%, MRR=0.710, Abstention=100%
-- **STEP4 Slice 4-1（BM25+RRF融合）已完成**：`src/retrieval/fusion.py`新建，`search.py`补上
-  `bm25_search`/`explain_fusion`。dev hybrid：Recall@5=100%（比baseline+10pp），
-  但MRR降到0.637——RRF融合会稀释向量检索本来排第1的题（真实案例：清理CMOS/显示拍摄设置列表）
-- **STEP4 Slice 4-2（Cross-Encoder重排）已完成**：`src/retrieval/reranker.py`新建，`search.py`补上
-  `rerank`/`explain_rerank`，`Hit`新增`rerank_score`字段。dev rerank：Recall@5回落到90%，
-  MRR微涨到0.641——重排修好了"清理CMOS"但搞砸了"触摸图标拍摄"（候选主题过于同质时Cross-Encoder
-  判别力不够精细）。四组配置(`baseline/hybrid/rerank/full`)结果已全部跑新、写入
-  `eval/results/dev_*.json`，`full`目前数字等同`rerank`（`use_small_to_big`还是TODO，符合预期）
-- 详细分析和逐题排名对比见 [docs/capability_log.md](docs/capability_log.md)（已有4个时间节的记录，
-  含"出借相机"案例的反转结论——当初误判为BM25问题，实际是索引覆盖率问题的余波）
-- 实现过程中修了一个真bug：`use_bm25`分支融合后未裁回`recall_top_k`，导致开BM25+重排时
-  候选数翻倍到38条、超3秒警告误触发，已在`search()`和`explain_rerank()`两处修复
-- 尚未 `git commit`（用户表示会自行处理 git，不需要 AI 代为提交）——当前有多个改动/新文件待提交：
-  `search.py`修改、新增`fusion.py`/`reranker.py`、`capability_log.md`更新、4个`eval/results/*.json`
-- 下一步：STEP4 Slice 4-2 已完成，下一步是 STEP5（small-to-big父块扩展 + 引用生成）
-
-进度请随实现推进更新本节（哪个 STEP/Slice 完成、关键数字如 Recall@5 等），
-方便后续对话快速对齐上下文，不必每次重新翻 playbook 全文。
-
----
-
-## 6. STEP 速查表（细节以 playbook 原文为准，此处只做导航）
-
-| STEP | 内容 | RAG 环节 | 可否砍 |
-|---|---|---|---|
-| 0 | 环境 + 双模式骨架 + 拆三雷（文本层/reranker/API） | — | 否 |
-| 1 | PDF 解析（PyMuPDF blocks，保存原始 page_no） | ① 解析 | 否 |
-| 2 | 父子切分 + 双路索引(向量+BM25) + search()骨架 + 端到端问答 | ②③④⑤⑦⑧ | 否 |
-| 3 | 手写 12 条评测题 + eval/harness.py（Recall@5/@20, MRR, Abstention） | 评测体系 | **绝对不能砍** |
-| 4 | BM25+RRF 融合 / Cross-Encoder 重排，填 search() 两个 TODO | ④检索融合⑤精排 | 否 |
-| 5 | small-to-big 父块扩展 + 页码引用生成 + 抗幻觉 prompt | ⑤扩展⑧生成 | 引用部分可简化 |
-| 6 | dev→full 切换，补评测题到20条，出正式消融数据 | — | **不能砍** |
-| 7 | FastAPI 服务 + README（含消融表、架构图、设计决策） | — | API可砍，README不能 |
-| 8 | 收尾：简历数字、八问自测、可选参数扫描实验 | — | 可压缩 |
-
-**四个消融配置**：`baseline`(全F) / `hybrid`(+bm25) / `rerank`(+bm25+rerank) /
-`full`(+bm25+rerank+s2b)，对应 `search()` 的四个 if 分支逐步打开。
-
----
-
-## 7. 关键机制备忘（跨 STEP 会反复用到）
-
-- **`{suffix}` 机制**：`config.dev.enabled=true` → suffix=`"_dev"`，否则 suffix=`""`，
-  所有 `config.paths.*` 和 `collection_name` 里的占位符据此替换，是 dev/full 隔离的唯一保障
-- **`load_config(overrides: dict)`**：点号路径覆盖任意配置项，同时服务于"消融实验切开关"
-  和"dev/full 模式切换"两个场景
-- **模块级单例 + `reset_clients()`**：chroma client / bm25 / parents 映射都用单例避免重复加载，
-  但必须能在 STEP6 切换模式后重置，否则会读到旧集合的数据
-- **tokenize 一致性**：`src/ingest/tokenizer.py` 的分词函数必须被 indexer（建索引）和
-  search（BM25查询）**同一处调用**，绝不能各写一套，否则 BM25 完全失效
-- **RRF 用排名不用原始分数**融合（向量分数和 BM25 分数量纲不同，直接加权不稳定）
-- **STEP3 后 `eval/harness.py` 和 `eval/golden_qa.jsonl` 锁死**，之后任何 STEP 的提示词
-  都要带"严禁修改 eval/"
-
----
-
-## 8. 参考
-
-- 详细的每一步"①原理 ②手动任务 ③完整提示词"：见
-  [Askingdoc_dev_playbook_v2.md](Askingdoc_dev_playbook_v2.md)（同目录）
-- 每次实现新 STEP 前，先定位 playbook 里对应章节，把提示词内容当作实现规格，
-  不要凭记忆改写，尤其【改动范围】和【严禁修改】部分要逐字遵守
-
-## 9. 其他规则
-
-- 每次启动前必读claude.md
-- 每一轮对话，请在提示词以外，读取以下内容：
-【项目背景】
-Askingdoc：长文档 RAG 问答系统，个人项目，一周工期。
-技术栈：Python 3.11 / PyMuPDF / LlamaIndex(仅切分) / ChromaDB / rank_bm25 /
-       embedding API / bge-reranker-v2-m3 / FastAPI
-设计原则：
-- 检索链路手写，不用框架高层抽象
-- 四个消融开关由 config.yaml 控制，一份代码跑四种配置
-- 双数据集模式：dev(前150页) 与 full(全量) 共用同一份代码，
-  仅由 config.dev.enabled 切换，禁止写两套逻辑
-
-【代码规范】
-- 注释和 docstring 用英文，要具体不要复述函数名
-- 路径用 pathlib
-- 关键中间结果打印出来便于调试
-- 生成后请逐行解释关键逻辑的工作原理
+- **每个 STEP/Slice 先讲原理再写代码**：用户是 RAG 初学者，目的除了交付作品也是
+  通过实现学懂原理。实现前先用大白话讲这一步在 RAG 全局流程里的位置、要解决什么矛盾，
+  实现后逐条回答提示词末尾的"输出后请解释"问题（挑关键行讲"为什么这样写"，不是复述代码）。
+- **评测题必须人工手写，不能 AI 代写**：`eval/golden_qa.jsonl` 是全项目唯一不能交给 AI
+  生成的内容——AI 从 chunk 反向生成的问题会和 chunk 高度同源，检索必然命中，Recall 虚高，
+  测不出真实能力。这个项目里实际发生过一次例外（用户手写8条、AI补4条），当时已明确告知
+  AI补充部分存在"同源"风险，用户知情后接受——但默认应坚持全部人工手写。
+- **实现完要用真实数据验证，不能只保证语法正确**：这个项目里多次出现"代码逻辑对但没用
+  真实数据测过就想当然"导致的问题（例如 STEP4 的 `recall_top_k` 截断 bug，直到用
+  `explain_rerank` 实测才发现候选数是 38 条而非预期的 20 条）。新功能实现后应尽量跑一次
+  真实调用（哪怕只是一个样例 query），而不是只做 import/语法检查。
+- **付费 API 调用（embedding/LLM/大规模索引）默认不擅自跑全量**，尤其涉及用户自己的
+  API 余额时，先用小范围验证（如 `--limit 20`），等用户明确说"可以，去跑"或类似授权后
+  再执行完整的、有实际花费的操作。
+- **写代码时如果发现文档描述和实际代码/数据不一致，要如实指出，不要沉默地"顺便"改掉**——
+  这个项目里 CLAUDE.md、`docs/capability_log.md` 的进度记录多次因为实现推进而过时，
+  发现后应该主动提出更新，而不是留着不管。
