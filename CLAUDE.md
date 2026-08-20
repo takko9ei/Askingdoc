@@ -93,14 +93,32 @@ embedding API / bge-reranker-v2-m3 / FastAPI
 
 ---
 
-## 5. 当前项目状态（2026-08-19 更新）
+## 5. 当前项目状态（2026-08-20 更新）
 
-- **尚未 `git init`**——STEP0 的环境搭建部分还没做，这是接下来第一件事
-- `.venv` 已创建，解释器 **Python 3.12.14**，与 playbook 一致（playbook 已从 3.11 改为 3.12）
-- `data/target.pdf` 已就位（约 8.4MB，PDF 1.5，zip deflate 编码），**尚未做雷1/雷2/雷3
-  三项检查**（文本层抽查、reranker 下载、embedding API 连通性），这些是 STEP0 的核心任务
-- 项目骨架（`src/` `eval/` `config.yaml` 等）**尚未创建**
-- 目前处于 **STEP0 开始前**的状态
+- **STEP0-2 均已完成**，三颗雷已由用户自行处理，`.env` 已配置真实 embedding
+  （硅基流动 `BAAI/bge-m3`）和 llm（DeepSeek `deepseek-v4-flash`）密钥
+- STEP1：`storage/blocks_dev.jsonl` 已生成（150页，873块，平均块长53.6字符），
+  页码抽查通过（含 PDF 页脚数字佐证）
+- STEP2 Slice 2-1：`parents_dev.jsonl`(29条) / `children_dev.jsonl`(205条) 已生成，
+  跨页 parent 页码映射抽查通过
+- STEP2 Slice 2-2：`src/ingest/tokenizer.py` + `indexer.py` 已实现，
+  全量205条索引已跑完（详见下方 Slice 2-3 之后的记录）
+- STEP2 Slice 2-3：`search.py`/`prompts.py`/`answerer.py`/`cli.py` 已实现并端到端验证通过
+  （vector_search真实检索 + LLM真实生成 + CLI交互循环均已测试）。
+  `search()` 的 use_bm25/use_rerank/use_small_to_big 三个分支仍是 TODO，留给 STEP4/5
+- 用户已完成"自问建立手感"（6题，见 [docs/capability_log.md](docs/capability_log.md)），
+  并已跑 `python -m src.ingest.indexer` **补全全量205/205条索引**（185新增+20跳过，0失败）。
+  复测同一批6题：1对→4对+1部分对，**证实绝大多数"答不出"确实是索引覆盖率问题**，
+  补完后自然解决。剩余2个真实问题已分类记录：
+  (a) "识别优先级设置"——PDF解析层限制，第112-113页是超链接跳转目录，
+      被解析成乱麻文本，向量检索找不到但BM25大概率能找到（STEP4验证候选案例）
+  (b) "更换电池"——检索到了含答案的片段(page29)但生成没充分利用，
+      原因待定（生成综合能力 vs page29本身非标准步骤），留到STEP3/5回头看
+- 次要发现：`c_0001`/`c_0002` 这类"目录式 child 话题混杂导致向量语义模糊"的
+  假阳性问题依然存在（与 small-to-big 矛盾同源），STEP4加BM25融合后需要
+  重新观察这两类假阳性是否减少
+- 尚未 `git commit`（用户表示会自行处理 git，不需要 AI 代为提交）
+- 下一步：STEP3（手写12条评测题 + `eval/harness.py`），之后 `eval/` 锁死
 
 进度请随实现推进更新本节（哪个 STEP/Slice 完成、关键数字如 Recall@5 等），
 方便后续对话快速对齐上下文，不必每次重新翻 playbook 全文。
